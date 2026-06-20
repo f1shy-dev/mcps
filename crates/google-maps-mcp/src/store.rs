@@ -22,6 +22,10 @@ pub struct Store {
 pub struct UsageEstimate {
     pub sku: String,
     pub units: u32,
+    pub billable_units: u32,
+    pub free_units_per_month: u32,
+    pub free_units_remaining_before_call: u32,
+    pub unit_price_usd: f64,
     pub estimated_cost_usd: f64,
     pub used_usd_this_month: f64,
     pub monthly_budget_usd: f64,
@@ -115,18 +119,26 @@ impl Store {
         sku: &str,
         units: u32,
         unit_price_usd: f64,
+        free_units_per_month: u32,
         monthly_budget_usd: f64,
         dry_run: bool,
     ) -> Result<UsageEstimate> {
         let month = current_month();
         let usage = self.usage_conn()?;
         let used = self.spent_usd_locked(&usage, &month)?;
-        let estimated = unit_price_usd * units as f64;
+        let used_units = sku_units(&usage, &month, sku)?;
+        let billable_units = billable_units_for_call(used_units, units, free_units_per_month);
+        let estimated = unit_price_usd * billable_units as f64;
         let projected = used + estimated;
         let allowed = projected <= monthly_budget_usd;
         Ok(UsageEstimate {
             sku: sku.to_string(),
             units,
+            billable_units,
+            free_units_per_month,
+            free_units_remaining_before_call: free_units_per_month
+                .saturating_sub(used_units.min(u32::MAX as u64) as u32),
+            unit_price_usd,
             estimated_cost_usd: estimated,
             used_usd_this_month: used,
             monthly_budget_usd,
@@ -147,6 +159,7 @@ impl Store {
         sku: &str,
         units: u32,
         unit_price_usd: f64,
+        free_units_per_month: u32,
         monthly_budget_usd: f64,
         request_hash: &str,
     ) -> Result<UsageEstimate> {
@@ -155,12 +168,19 @@ impl Store {
         let mut usage = self.usage_conn()?;
         let tx = usage.transaction()?;
         let used = spent_usd(&tx, &month)?;
-        let estimated = unit_price_usd * units as f64;
+        let used_units = sku_units(&tx, &month, sku)?;
+        let billable_units = billable_units_for_call(used_units, units, free_units_per_month);
+        let estimated = unit_price_usd * billable_units as f64;
         let projected = used + estimated;
         let allowed = projected <= monthly_budget_usd;
         let estimate = UsageEstimate {
             sku: sku.to_string(),
             units,
+            billable_units,
+            free_units_per_month,
+            free_units_remaining_before_call: free_units_per_month
+                .saturating_sub(used_units.min(u32::MAX as u64) as u32),
+            unit_price_usd,
             estimated_cost_usd: estimated,
             used_usd_this_month: used,
             monthly_budget_usd,
@@ -387,6 +407,26 @@ fn spent_usd(conn: &Connection, month: &str) -> Result<f64> {
         .unwrap_or(0.0))
 }
 
+fn sku_units(conn: &Connection, month: &str, sku: &str) -> Result<u64> {
+    let units = conn
+        .query_row(
+            "SELECT COALESCE(units, 0) FROM monthly_usage WHERE month = ? AND sku = ?",
+            params![month, sku],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0);
+    Ok(units.max(0) as u64)
+}
+
+fn billable_units_for_call(used_units: u64, request_units: u32, free_units_per_month: u32) -> u32 {
+    let free_units = free_units_per_month as u64;
+    let before = used_units.saturating_sub(free_units);
+    let after = used_units
+        .saturating_add(request_units as u64)
+        .saturating_sub(free_units);
+    after.saturating_sub(before).min(u32::MAX as u64) as u32
+}
+
 fn secure_path(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -397,4 +437,22 @@ fn secure_path(path: &Path) -> Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::billable_units_for_call;
+
+    #[test]
+    fn free_cap_makes_early_calls_zero_cost() {
+        assert_eq!(billable_units_for_call(0, 1, 10_000), 0);
+        assert_eq!(billable_units_for_call(9_999, 1, 10_000), 0);
+    }
+
+    #[test]
+    fn only_units_above_free_cap_are_billable() {
+        assert_eq!(billable_units_for_call(9_999, 3, 10_000), 2);
+        assert_eq!(billable_units_for_call(10_000, 3, 10_000), 3);
+        assert_eq!(billable_units_for_call(12_000, 3, 10_000), 3);
+    }
 }

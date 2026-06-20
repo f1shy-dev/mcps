@@ -60,6 +60,7 @@ pub struct CallSpec {
     pub sku: &'static str,
     pub units: u32,
     pub unit_price_usd: f64,
+    pub free_units_per_month: u32,
     pub cache_ttl_seconds: i64,
 }
 
@@ -200,6 +201,7 @@ impl GoogleClient {
                     spec.sku,
                     0,
                     spec.unit_price_usd,
+                    spec.free_units_per_month,
                     self.config.budget.monthly_budget_usd,
                     false,
                 )
@@ -302,6 +304,7 @@ impl GoogleClient {
                 spec.sku,
                 spec.units,
                 spec.unit_price_usd,
+                spec.free_units_per_month,
                 self.config.budget.monthly_budget_usd,
                 dry_run,
             )
@@ -319,6 +322,7 @@ impl GoogleClient {
                 spec.sku,
                 spec.units,
                 spec.unit_price_usd,
+                spec.free_units_per_month,
                 self.config.budget.monthly_budget_usd,
                 cache_key,
             )
@@ -453,27 +457,43 @@ pub fn err(
 }
 
 pub fn spec_for_tool(tool_name: &str, units: u32) -> Option<CallSpec> {
-    let (module, sku, price, ttl) = match tool_name {
+    let (module, sku, price, free_units, ttl) = match tool_name {
         "gmaps_geocode" | "gmaps_reverse_geocode" => {
-            ("geocoding", "Geocoding", 0.005, 30 * 24 * 3600)
+            ("geocoding", "Geocoding", 0.005, 10_000, 30 * 24 * 3600)
         }
-        "gmaps_find_place" | "gmaps_place_details" => ("places", "Places", 0.017, 24 * 3600),
-        "gmaps_autocomplete" => ("autocomplete", "Autocomplete", 0.00283, 24 * 3600),
-        "gmaps_timezone" => ("timezone", "Time Zone", 0.005, 30 * 24 * 3600),
-        "gmaps_route" => ("routes", "Routes", 0.005, 5 * 60),
-        "gmaps_route_matrix" => ("route_matrix", "Route Matrix", 0.005, 5 * 60),
-        "gmaps_static_map" => ("static_maps", "Static Maps", 0.002, 7 * 24 * 3600),
-        "gmaps_streetview" => ("streetview", "Static Street View", 0.007, 7 * 24 * 3600),
-        "gmaps_elevation" => ("elevation", "Elevation", 0.005, 30 * 24 * 3600),
-        "gmaps_weather" => ("weather", "Weather", 0.005, 15 * 60),
-        "gmaps_air_quality" => ("air_quality", "Air Quality", 0.005, 15 * 60),
-        "gmaps_pollen" => ("pollen", "Pollen", 0.005, 60 * 60),
-        "gmaps_address_validation" => {
-            ("address_validation", "Address Validation", 0.017, 24 * 3600)
-        }
-        "gmaps_roads" => ("roads", "Roads", 0.01, 24 * 3600),
-        "gmaps_route_optimization" => ("route_optimization", "Route Optimization", 0.05, 5 * 60),
-        "gmaps_solar" => ("solar", "Solar", 0.01, 24 * 3600),
+        "gmaps_find_place" | "gmaps_place_details" => ("places", "Places", 0.017, 5_000, 24 * 3600),
+        "gmaps_autocomplete" => ("autocomplete", "Autocomplete", 0.00283, 10_000, 24 * 3600),
+        "gmaps_timezone" => ("timezone", "Time Zone", 0.005, 10_000, 30 * 24 * 3600),
+        "gmaps_route" => ("routes", "Routes", 0.005, 10_000, 5 * 60),
+        "gmaps_route_matrix" => ("route_matrix", "Route Matrix", 0.005, 10_000, 5 * 60),
+        "gmaps_static_map" => ("static_maps", "Static Maps", 0.002, 10_000, 7 * 24 * 3600),
+        "gmaps_streetview" => (
+            "streetview",
+            "Static Street View",
+            0.007,
+            10_000,
+            7 * 24 * 3600,
+        ),
+        "gmaps_elevation" => ("elevation", "Elevation", 0.005, 5_000, 30 * 24 * 3600),
+        "gmaps_weather" => ("weather", "Weather", 0.00015, 10_000, 15 * 60),
+        "gmaps_air_quality" => ("air_quality", "Air Quality", 0.005, 10_000, 15 * 60),
+        "gmaps_pollen" => ("pollen", "Pollen", 0.01, 5_000, 60 * 60),
+        "gmaps_address_validation" => (
+            "address_validation",
+            "Address Validation",
+            0.017,
+            5_000,
+            24 * 3600,
+        ),
+        "gmaps_roads" => ("roads", "Roads", 0.01, 5_000, 24 * 3600),
+        "gmaps_route_optimization" => (
+            "route_optimization",
+            "Route Optimization",
+            0.01,
+            5_000,
+            5 * 60,
+        ),
+        "gmaps_solar" => ("solar", "Solar", 0.01, 10_000, 24 * 3600),
         _ => return None,
     };
     Some(CallSpec {
@@ -482,6 +502,7 @@ pub fn spec_for_tool(tool_name: &str, units: u32) -> Option<CallSpec> {
         sku,
         units,
         unit_price_usd: price,
+        free_units_per_month: free_units,
         cache_ttl_seconds: ttl,
     })
 }
