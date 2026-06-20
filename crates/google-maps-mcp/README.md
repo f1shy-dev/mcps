@@ -6,6 +6,8 @@ Uncached live calls reserve spend in a local SQLite monthly budget ledger before
 
 The default bind is `127.0.0.1:8000`. If `server.bind` is changed to a non-loopback address, `GOOGLE_MAPS_MCP_BEARER_TOKEN` must be set and MCP requests must include `Authorization: Bearer <token>`.
 
+Most tools use `GOOGLE_MAPS_API_KEY`. Route Optimization requires OAuth and reads `GOOGLE_MAPS_OAUTH_TOKEN`.
+
 ## Tools
 
 - `gmaps_usage_status`

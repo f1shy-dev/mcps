@@ -63,6 +63,11 @@ pub struct CallSpec {
     pub cache_ttl_seconds: i64,
 }
 
+enum GoogleCredential {
+    ApiKey(String),
+    OAuthToken(String),
+}
+
 impl GoogleClient {
     pub fn new(config: Arc<Config>, store: Arc<Store>) -> Result<Self> {
         let http = reqwest::Client::builder()
@@ -215,7 +220,12 @@ impl GoogleClient {
             );
         }
 
-        let Some(api_key) = self.api_key_or_error() else {
+        let credential = match self.credential_for(endpoint) {
+            Ok(credential) => credential,
+            Err(error) => return self.error_envelope(error),
+        };
+
+        let Some(credential) = credential else {
             return err(
                 "CONFIG_MISSING_API_KEY",
                 format!("{} is not set", self.config.provider.api_key_env),
@@ -236,7 +246,7 @@ impl GoogleClient {
                 }
 
                 let result = self
-                    .send_google(method, endpoint, query, body, &api_key)
+                    .send_google(method, endpoint, query, body, credential)
                     .await;
                 match result {
                     Ok(value) => {
@@ -319,8 +329,19 @@ impl GoogleClient {
             })
     }
 
-    fn api_key_or_error(&self) -> Option<String> {
-        self.config.api_key()
+    fn credential_for(&self, endpoint: &str) -> Result<Option<GoogleCredential>, ToolError> {
+        if endpoint.starts_with("https://routeoptimization.googleapis.com/") {
+            return self
+                .config
+                .oauth_token()
+                .map(|token| Some(GoogleCredential::OAuthToken(token)))
+                .ok_or_else(|| ToolError::Refused {
+                    code: "CONFIG_MISSING_OAUTH_TOKEN",
+                    message: format!("{} is not set", self.config.provider.oauth_token_env),
+                    usage: None,
+                });
+        }
+        Ok(self.config.api_key().map(GoogleCredential::ApiKey))
     }
 
     async fn send_google(
@@ -329,17 +350,23 @@ impl GoogleClient {
         endpoint: &str,
         mut query: BTreeMap<String, String>,
         body: Option<Value>,
-        api_key: &str,
+        credential: GoogleCredential,
     ) -> Result<Value, ToolError> {
         let uses_header_key = endpoint.starts_with("https://places.googleapis.com/")
             || endpoint.starts_with("https://routes.googleapis.com/");
-        if !uses_header_key {
+        if !uses_header_key && let GoogleCredential::ApiKey(api_key) = &credential {
             query.insert("key".to_string(), api_key.to_string());
         }
         let url = build_url(endpoint, &query);
         let mut request = self.http.request(method, &url);
-        if uses_header_key {
-            request = request.header("X-Goog-Api-Key", api_key);
+        match credential {
+            GoogleCredential::ApiKey(api_key) if uses_header_key => {
+                request = request.header("X-Goog-Api-Key", api_key);
+            }
+            GoogleCredential::OAuthToken(token) => {
+                request = request.bearer_auth(token);
+            }
+            _ => {}
         }
         if let Some(field_mask) = field_mask_for(endpoint) {
             request = request.header("X-Goog-FieldMask", field_mask);

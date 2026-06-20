@@ -911,7 +911,7 @@ async fn roads(state: &AppState, input: RoadsInput) -> ToolEnvelope {
     let mut query = BTreeMap::new();
     if !input.path.is_empty() {
         query.insert(
-            "path".to_string(),
+            if mode == "nearest" { "points" } else { "path" }.to_string(),
             input
                 .path
                 .iter()

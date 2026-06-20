@@ -7,6 +7,7 @@ bearer_token_env = "GOOGLE_MAPS_MCP_BEARER_TOKEN"
 
 [provider]
 api_key_env = "GOOGLE_MAPS_API_KEY"
+oauth_token_env = "GOOGLE_MAPS_OAUTH_TOKEN"
 # Required only for route optimization.
 project_id = ""
 language_code = "en-GB"

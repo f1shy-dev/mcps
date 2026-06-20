@@ -37,6 +37,8 @@ pub struct ServerConfig {
 pub struct ProviderConfig {
     #[serde(default = "default_api_key_env")]
     pub api_key_env: String,
+    #[serde(default = "default_oauth_token_env")]
+    pub oauth_token_env: String,
     #[serde(default)]
     pub project_id: String,
     #[serde(default = "default_language_code")]
@@ -146,6 +148,12 @@ impl Config {
             .filter(|value| !value.trim().is_empty())
     }
 
+    pub fn oauth_token(&self) -> Option<String> {
+        env::var(&self.provider.oauth_token_env)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    }
+
     pub fn bearer_token(&self) -> Option<String> {
         env::var(&self.server.bearer_token_env)
             .ok()
@@ -232,6 +240,7 @@ impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
             api_key_env: default_api_key_env(),
+            oauth_token_env: default_oauth_token_env(),
             project_id: String::new(),
             language_code: default_language_code(),
             region_code: default_region_code(),
@@ -329,6 +338,9 @@ fn default_instructions() -> String {
 }
 fn default_api_key_env() -> String {
     "GOOGLE_MAPS_API_KEY".to_string()
+}
+fn default_oauth_token_env() -> String {
+    "GOOGLE_MAPS_OAUTH_TOKEN".to_string()
 }
 fn default_bearer_token_env() -> String {
     "GOOGLE_MAPS_MCP_BEARER_TOKEN".to_string()
