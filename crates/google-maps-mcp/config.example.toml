@@ -1,8 +1,9 @@
 [server]
-bind = "0.0.0.0:8000"
+bind = "127.0.0.1:8000"
 name = "Google Maps MCP"
 instructions = "Use Google Maps tools for geocoding, places, routing, imagery, environment, and related location APIs. All billable calls are checked against a local monthly budget first."
 allowed_origins = []
+bearer_token_env = "GOOGLE_MAPS_MCP_BEARER_TOKEN"
 
 [provider]
 api_key_env = "GOOGLE_MAPS_API_KEY"
@@ -52,4 +53,3 @@ address_validation = true
 roads = true
 route_optimization = true
 solar = true
-

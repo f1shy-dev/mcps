@@ -2,7 +2,9 @@
 
 `google-maps-mcp` is an independent Streamable HTTP MCP server for Google Maps Platform APIs. It exposes geocoding, places, autocomplete, timezone, routes, route matrix, static maps, Street View, elevation, weather, air quality, pollen, address validation, roads, route optimization, and solar tools.
 
-All billable calls pass through a local SQLite monthly budget gate before the Google request is made. Cache hits do not call Google.
+Uncached live calls reserve spend in a local SQLite monthly budget ledger before the Google request is made. Cache hits do not call Google or require remaining budget. Static Maps and Street View image tools only build unsigned URLs; they report estimated cost but do not record spend because the server did not fetch Google.
+
+The default bind is `127.0.0.1:8000`. If `server.bind` is changed to a non-loopback address, `GOOGLE_MAPS_MCP_BEARER_TOKEN` must be set and MCP requests must include `Authorization: Bearer <token>`.
 
 ## Tools
 
@@ -36,3 +38,12 @@ cargo run -p google-maps-mcp
 ```
 
 Without `GOOGLE_MAPS_API_KEY`, dry-runs and usage status still work; billable live calls fail closed.
+
+For network exposure:
+
+```bash
+GOOGLE_MAPS_API_KEY=... \
+GOOGLE_MAPS_MCP_BEARER_TOKEN=... \
+GOOGLE_MAPS_MCP_CONFIG=/path/to/config-with-non-loopback-bind.toml \
+cargo run -p google-maps-mcp
+```

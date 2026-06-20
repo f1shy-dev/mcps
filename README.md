@@ -9,7 +9,7 @@ Small, independent MCP servers.
 
 Shared:
 
-- [`mcp-shared`](crates/mcp-shared): JSON-RPC and Streamable HTTP helpers.
+- [`mcp-shared`](crates/mcp-shared): JSON-RPC, Streamable HTTP, auth, and typed tool schema helpers.
 
 ## Commands
 

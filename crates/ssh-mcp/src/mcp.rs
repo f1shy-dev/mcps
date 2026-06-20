@@ -2,8 +2,9 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{Json, extract::State, http::HeaderMap, response::Response};
 use mcp_shared::{
-    JsonRpcError, JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION, handle_streamable_http,
-    invalid_params, method_not_found, response_from_result, schema_value, tool_result,
+    JsonRpcError, JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION, ToolDefinition,
+    handle_streamable_http, invalid_params, method_not_found, parse_tool_input,
+    response_from_result, tool_definition, tool_result,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -27,14 +28,6 @@ impl AppState {
             config,
         }
     }
-}
-
-#[derive(Debug, Serialize)]
-struct Tool {
-    name: &'static str,
-    description: &'static str,
-    #[serde(rename = "inputSchema")]
-    input_schema: Value,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -88,18 +81,16 @@ fn initialize_result(state: &AppState) -> Value {
     })
 }
 
-fn tools() -> Vec<Tool> {
+fn tools() -> Vec<ToolDefinition> {
     vec![
-        Tool {
-            name: "ssh_targets",
-            description: "List configured SSH targets without exposing credentials.",
-            input_schema: schema_value::<EmptyInput>(),
-        },
-        Tool {
-            name: "ssh_run",
-            description: "Run a non-interactive command on a named SSH target.",
-            input_schema: schema_value::<SshRunInput>(),
-        },
+        tool_definition::<EmptyInput>(
+            "ssh_targets",
+            "List configured SSH targets without exposing credentials.",
+        ),
+        tool_definition::<SshRunInput>(
+            "ssh_run",
+            "Run a non-interactive command on a named SSH target.",
+        ),
     ]
 }
 
@@ -116,8 +107,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, JsonRpcErro
     match name {
         "ssh_targets" => Ok(tool_result(targets_result(state), false)),
         "ssh_run" => {
-            let input: SshRunInput = serde_json::from_value(arguments)
-                .map_err(|error| invalid_params(format!("invalid ssh_run arguments: {error}")))?;
+            let input: SshRunInput = parse_tool_input("ssh_run", arguments)?;
             match run_ssh_command(&state.config.limits, &state.targets, input).await {
                 Ok(output) => Ok(tool_result(output, false)),
                 Err(error) => Ok(tool_result(

@@ -29,6 +29,8 @@ pub struct ServerConfig {
     pub instructions: String,
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    #[serde(default = "default_bearer_token_env")]
+    pub bearer_token_env: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -144,6 +146,12 @@ impl Config {
             .filter(|value| !value.trim().is_empty())
     }
 
+    pub fn bearer_token(&self) -> Option<String> {
+        env::var(&self.server.bearer_token_env)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    }
+
     pub fn module_enabled(&self, module: &str) -> bool {
         match module {
             "geocoding" => self.modules.geocoding,
@@ -178,6 +186,12 @@ impl Config {
         if !self.budget.refuse_unknown_pricing {
             bail!("budget.refuse_unknown_pricing=false is not supported");
         }
+        if !self.server.bind.ip().is_loopback() && self.bearer_token().is_none() {
+            bail!(
+                "{} must be set when binding Google Maps MCP to a non-loopback address",
+                self.server.bearer_token_env
+            );
+        }
         if self.budget.monthly_budget_usd < 0.0 {
             bail!("monthly_budget_usd must not be negative");
         }
@@ -209,6 +223,7 @@ impl Default for ServerConfig {
             name: default_name(),
             instructions: default_instructions(),
             allowed_origins: Vec::new(),
+            bearer_token_env: default_bearer_token_env(),
         }
     }
 }
@@ -304,7 +319,7 @@ fn home_dir() -> PathBuf {
 }
 
 fn default_bind() -> SocketAddr {
-    "0.0.0.0:8000".parse().expect("valid default bind")
+    "127.0.0.1:8000".parse().expect("valid default bind")
 }
 fn default_name() -> String {
     "Google Maps MCP".to_string()
@@ -314,6 +329,9 @@ fn default_instructions() -> String {
 }
 fn default_api_key_env() -> String {
     "GOOGLE_MAPS_API_KEY".to_string()
+}
+fn default_bearer_token_env() -> String {
+    "GOOGLE_MAPS_MCP_BEARER_TOKEN".to_string()
 }
 fn default_language_code() -> String {
     "en-GB".to_string()

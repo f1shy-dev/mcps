@@ -1,5 +1,6 @@
 use std::{
     fs,
+    path::Path,
     sync::{Mutex, MutexGuard},
 };
 
@@ -50,6 +51,7 @@ impl Store {
         if let Some(parent) = config.budget.ledger_path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create ledger dir {}", parent.display()))?;
+            secure_path(parent)?;
         }
         let usage = Connection::open(&config.budget.ledger_path).with_context(|| {
             format!(
@@ -57,15 +59,18 @@ impl Store {
                 config.budget.ledger_path.display()
             )
         })?;
+        secure_path(&config.budget.ledger_path)?;
         init_usage(&usage)?;
 
         let cache = if config.cache.enabled {
             if let Some(parent) = config.cache.path.parent() {
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create cache dir {}", parent.display()))?;
+                secure_path(parent)?;
             }
             let cache = Connection::open(&config.cache.path)
                 .with_context(|| format!("failed to open cache {}", config.cache.path.display()))?;
+            secure_path(&config.cache.path)?;
             init_cache(&cache)?;
             Some(Mutex::new(cache))
         } else {
@@ -134,6 +139,59 @@ impl Store {
             },
             dry_run,
         })
+    }
+
+    pub fn reserve_usage(
+        &self,
+        tool_name: &str,
+        sku: &str,
+        units: u32,
+        unit_price_usd: f64,
+        monthly_budget_usd: f64,
+        request_hash: &str,
+    ) -> Result<UsageEstimate> {
+        let month = current_month();
+        let ts = Utc::now().to_rfc3339();
+        let mut usage = self.usage_conn()?;
+        let tx = usage.transaction()?;
+        let used = spent_usd(&tx, &month)?;
+        let estimated = unit_price_usd * units as f64;
+        let projected = used + estimated;
+        let allowed = projected <= monthly_budget_usd;
+        let estimate = UsageEstimate {
+            sku: sku.to_string(),
+            units,
+            estimated_cost_usd: estimated,
+            used_usd_this_month: used,
+            monthly_budget_usd,
+            remaining_budget_usd: (monthly_budget_usd - used).max(0.0),
+            allowed,
+            denial_reason: if allowed {
+                None
+            } else {
+                Some("monthly_budget_exceeded".to_string())
+            },
+            dry_run: false,
+        };
+        if !allowed {
+            return Ok(estimate);
+        }
+        tx.execute(
+            "INSERT INTO usage_events
+             (ts, month, tool_name, sku, units, estimated_cost_usd, cache_hit, request_hash, status, error_code)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'reserved', NULL)",
+            params![ts, month, tool_name, sku, units, estimated, request_hash],
+        )?;
+        tx.execute(
+            "INSERT INTO monthly_usage (month, sku, units, estimated_cost_usd)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(month, sku) DO UPDATE SET
+               units = units + excluded.units,
+               estimated_cost_usd = estimated_cost_usd + excluded.estimated_cost_usd",
+            params![month, sku, units, estimated],
+        )?;
+        tx.commit()?;
+        Ok(estimate)
     }
 
     pub fn record_usage(
@@ -242,13 +300,7 @@ impl Store {
     }
 
     fn spent_usd_locked(&self, usage: &Connection, month: &str) -> Result<f64> {
-        Ok(usage
-            .query_row(
-                "SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM monthly_usage WHERE month = ?",
-                [month],
-                |row| row.get(0),
-            )
-            .unwrap_or(0.0))
+        spent_usd(usage, month)
     }
 
     fn evict_cache_locked(&self, cache: &Connection) -> Result<()> {
@@ -323,4 +375,26 @@ fn init_cache(conn: &Connection) -> Result<()> {
 
 pub fn current_month() -> String {
     Utc::now().format("%Y-%m").to_string()
+}
+
+fn spent_usd(conn: &Connection, month: &str) -> Result<f64> {
+    Ok(conn
+        .query_row(
+            "SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM monthly_usage WHERE month = ?",
+            [month],
+            |row| row.get(0),
+        )
+        .unwrap_or(0.0))
+}
+
+fn secure_path(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let metadata = fs::metadata(path)?;
+        let mode = if metadata.is_dir() { 0o700 } else { 0o600 };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    }
+    Ok(())
 }

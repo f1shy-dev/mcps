@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use anyhow::Result;
-use reqwest::{Method, Url};
+use reqwest::Method;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -55,7 +55,7 @@ pub struct ErrorBody {
 
 #[derive(Clone, Debug)]
 pub struct CallSpec {
-    pub tool_name: &'static str,
+    pub tool_name: String,
     pub module: &'static str,
     pub sku: &'static str,
     pub units: u32,
@@ -132,50 +132,24 @@ impl GoogleClient {
         dry_run: bool,
     ) -> ToolEnvelope {
         let cache_key = cache_key_for_request(&spec, endpoint, &query, &Value::Null);
-        match self.preflight(&spec, dry_run) {
-            Ok(usage) => {
-                if dry_run {
-                    return ok(
-                        json!({ "url": build_url_without_key(endpoint, &query), "dry_run": true }),
-                        Some(usage),
-                        None,
-                    );
-                }
-                let Some(api_key) = self.api_key_or_error(Some(usage.clone())) else {
-                    return err(
-                        "CONFIG_MISSING_API_KEY",
-                        format!("{} is not set", self.config.provider.api_key_env),
-                        false,
-                        Some(usage),
-                    );
-                };
-                let mut full_query = query.clone();
-                full_query.insert("key".to_string(), api_key);
-                let url = build_url(endpoint, &full_query);
-                if let Err(error) =
-                    self.store
-                        .record_usage(spec.tool_name, &usage, false, &cache_key, "ok", None)
-                {
-                    return err(
-                        "USAGE_LEDGER_UNAVAILABLE",
-                        error.to_string(),
-                        false,
-                        Some(usage),
-                    );
-                }
-                ok(
-                    json!({
-                        "url": redact_key(&url),
-                        "url_contains_api_key": true,
-                    }),
-                    Some(usage),
-                    Some(CacheInfo {
-                        hit: false,
-                        ttl_seconds: None,
-                        cache_key: Some(cache_key),
-                    }),
-                )
-            }
+        if let Err(error) = self.check_module(&spec) {
+            return self.error_envelope(error);
+        }
+        match self.estimate(&spec, dry_run) {
+            Ok(usage) => ok(
+                json!({
+                    "url": build_url_without_key(endpoint, &query),
+                    "dry_run": dry_run,
+                    "billable_when_fetched": true,
+                    "usage_recorded": false,
+                }),
+                Some(usage),
+                Some(CacheInfo {
+                    hit: false,
+                    ttl_seconds: None,
+                    cache_key: Some(cache_key),
+                }),
+            ),
             Err(error) => self.error_envelope(error),
         }
     }
@@ -191,76 +165,81 @@ impl GoogleClient {
     ) -> ToolEnvelope {
         let cache_body = body.clone().unwrap_or(Value::Null);
         let cache_key = cache_key_for_request(&spec, endpoint, &query, &cache_body);
-        match self.preflight(&spec, dry_run) {
+        match self.check_module(&spec) {
+            Ok(()) => {}
+            Err(error) => return self.error_envelope(error),
+        }
+        if dry_run {
+            return match self.estimate(&spec, true) {
+                Ok(usage) => ok(
+                    json!({
+                        "dry_run": true,
+                        "endpoint": endpoint,
+                        "method": method.as_str(),
+                    }),
+                    Some(usage),
+                    Some(CacheInfo {
+                        hit: false,
+                        ttl_seconds: None,
+                        cache_key: Some(cache_key),
+                    }),
+                ),
+                Err(error) => self.error_envelope(error),
+            };
+        }
+
+        if let Ok(Some(entry)) = self.store.cache_get(&cache_key) {
+            let usage = self
+                .store
+                .estimate(
+                    spec.sku,
+                    0,
+                    spec.unit_price_usd,
+                    self.config.budget.monthly_budget_usd,
+                    false,
+                )
+                .ok();
+            if let Some(usage) = &usage {
+                let _ =
+                    self.store
+                        .record_usage(&spec.tool_name, usage, true, &cache_key, "ok", None);
+            }
+            return ok(
+                entry.value,
+                usage,
+                Some(CacheInfo {
+                    hit: true,
+                    ttl_seconds: entry.ttl_seconds,
+                    cache_key: Some(cache_key),
+                }),
+            );
+        }
+
+        let Some(api_key) = self.api_key_or_error() else {
+            return err(
+                "CONFIG_MISSING_API_KEY",
+                format!("{} is not set", self.config.provider.api_key_env),
+                false,
+                None,
+            );
+        };
+
+        match self.reserve(&spec, &cache_key) {
             Ok(usage) => {
-                if dry_run {
-                    return ok(
-                        json!({
-                            "dry_run": true,
-                            "endpoint": endpoint,
-                            "method": method.as_str(),
-                        }),
-                        Some(usage),
-                        Some(CacheInfo {
-                            hit: false,
-                            ttl_seconds: None,
-                            cache_key: Some(cache_key),
-                        }),
-                    );
-                }
-
-                if let Ok(Some(entry)) = self.store.cache_get(&cache_key) {
-                    let _ = self.store.record_usage(
-                        spec.tool_name,
-                        &usage,
-                        true,
-                        &cache_key,
-                        "ok",
-                        None,
-                    );
-                    return ok(
-                        entry.value,
-                        Some(UsageEstimate {
-                            estimated_cost_usd: 0.0,
-                            ..usage
-                        }),
-                        Some(CacheInfo {
-                            hit: true,
-                            ttl_seconds: entry.ttl_seconds,
-                            cache_key: Some(cache_key),
-                        }),
-                    );
-                }
-
-                let Some(api_key) = self.api_key_or_error(Some(usage.clone())) else {
+                if !usage.allowed {
                     return err(
-                        "CONFIG_MISSING_API_KEY",
-                        format!("{} is not set", self.config.provider.api_key_env),
+                        "MONTHLY_BUDGET_EXCEEDED",
+                        "projected call would exceed local monthly budget",
                         false,
                         Some(usage),
                     );
-                };
+                }
 
                 let result = self
                     .send_google(method, endpoint, query, body, &api_key)
                     .await;
                 match result {
                     Ok(value) => {
-                        if let Err(error) = self.store.record_usage(
-                            spec.tool_name,
-                            &usage,
-                            false,
-                            &cache_key,
-                            "ok",
-                            None,
-                        ) {
-                            return err(
-                                "USAGE_LEDGER_UNAVAILABLE",
-                                error.to_string(),
-                                false,
-                                Some(usage),
-                            );
-                        }
                         let _ = self
                             .store
                             .cache_put(&cache_key, spec.cache_ttl_seconds, &value);
@@ -281,7 +260,7 @@ impl GoogleClient {
                             ToolError::Refused { code, .. } => code,
                         };
                         let _ = self.store.record_usage(
-                            spec.tool_name,
+                            &spec.tool_name,
                             &usage,
                             false,
                             &cache_key,
@@ -296,7 +275,7 @@ impl GoogleClient {
         }
     }
 
-    fn preflight(&self, spec: &CallSpec, dry_run: bool) -> Result<UsageEstimate, ToolError> {
+    fn check_module(&self, spec: &CallSpec) -> Result<(), ToolError> {
         if !self.config.module_enabled(spec.module) {
             return Err(ToolError::Refused {
                 code: "CONFIG_MODULE_DISABLED",
@@ -304,15 +283,7 @@ impl GoogleClient {
                 usage: None,
             });
         }
-        let usage = self.estimate(spec, dry_run)?;
-        if !usage.allowed {
-            return Err(ToolError::Refused {
-                code: "MONTHLY_BUDGET_EXCEEDED",
-                message: "projected call would exceed local monthly budget".to_string(),
-                usage: Some(usage),
-            });
-        }
-        Ok(usage)
+        Ok(())
     }
 
     fn estimate(&self, spec: &CallSpec, dry_run: bool) -> Result<UsageEstimate, ToolError> {
@@ -331,7 +302,24 @@ impl GoogleClient {
             })
     }
 
-    fn api_key_or_error(&self, _usage: Option<UsageEstimate>) -> Option<String> {
+    fn reserve(&self, spec: &CallSpec, cache_key: &str) -> Result<UsageEstimate, ToolError> {
+        self.store
+            .reserve_usage(
+                &spec.tool_name,
+                spec.sku,
+                spec.units,
+                spec.unit_price_usd,
+                self.config.budget.monthly_budget_usd,
+                cache_key,
+            )
+            .map_err(|error| ToolError::Refused {
+                code: "USAGE_LEDGER_UNAVAILABLE",
+                message: error.to_string(),
+                usage: None,
+            })
+    }
+
+    fn api_key_or_error(&self) -> Option<String> {
         self.config.api_key()
     }
 
@@ -364,6 +352,15 @@ impl GoogleClient {
             .await
             .map_err(|error| ToolError::Request(redact_key(&error.to_string())))?;
         let status = response.status();
+        if response
+            .content_length()
+            .is_some_and(|len| len > self.config.limits.max_raw_response_bytes as u64)
+        {
+            return Err(ToolError::Request(format!(
+                "google response exceeded max_raw_response_bytes ({})",
+                self.config.limits.max_raw_response_bytes
+            )));
+        }
         let text = response
             .bytes()
             .await
@@ -453,7 +450,7 @@ pub fn spec_for_tool(tool_name: &str, units: u32) -> Option<CallSpec> {
         _ => return None,
     };
     Some(CallSpec {
-        tool_name: Box::leak(tool_name.to_string().into_boxed_str()),
+        tool_name: tool_name.to_string(),
         module,
         sku,
         units,
@@ -532,13 +529,38 @@ fn google_payload_is_error(value: &Value) -> bool {
 }
 
 pub fn redact_key(text: &str) -> String {
-    let mut redacted = text.to_string();
-    if let Ok(url) = Url::parse(text) {
-        if url.query_pairs().any(|(key, _)| key == "key") {
-            let mut scrubbed = url.clone();
-            scrubbed.set_query(Some("key=REDACTED"));
-            redacted = scrubbed.to_string();
-        }
+    let mut redacted = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find("key=") {
+        let (prefix, suffix) = rest.split_at(index);
+        redacted.push_str(prefix);
+        redacted.push_str("key=REDACTED");
+        let value = &suffix[4..];
+        let end = value
+            .find(|ch: char| {
+                matches!(
+                    ch,
+                    '&' | ' ' | '\t' | '\r' | '\n' | '"' | '\'' | ')' | '<' | '>'
+                )
+            })
+            .unwrap_or(value.len());
+        rest = &value[end..];
     }
-    redacted.replace("key=", "key=REDACTED:")
+    redacted.push_str(rest);
+    redacted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_key;
+
+    #[test]
+    fn redacts_embedded_query_keys() {
+        let text =
+            "error sending request for url (https://x.test/maps?center=a&key=leakme123&size=1)";
+        let redacted = redact_key(text);
+        assert!(!redacted.contains("leakme123"));
+        assert!(redacted.contains("key=REDACTED"));
+        assert!(redacted.contains("size=1"));
+    }
 }

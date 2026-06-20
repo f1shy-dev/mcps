@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use schemars::{JsonSchema, schema_for};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -58,12 +58,44 @@ where
     F: FnOnce(JsonRpcRequest) -> Fut,
     Fut: Future<Output = JsonRpcResponse>,
 {
-    if !origin_allowed(allowed_origins, &headers) {
+    handle_streamable_http_with_access(
+        headers,
+        message,
+        &AccessPolicy {
+            allowed_origins,
+            bearer_token: None,
+        },
+        dispatch,
+    )
+    .await
+}
+
+pub async fn handle_streamable_http_with_access<F, Fut>(
+    headers: HeaderMap,
+    message: Value,
+    access: &AccessPolicy<'_>,
+    dispatch: F,
+) -> Response
+where
+    F: FnOnce(JsonRpcRequest) -> Fut,
+    Fut: Future<Output = JsonRpcResponse>,
+{
+    if !origin_allowed(access.allowed_origins, &headers) {
         return error_response(
             StatusCode::FORBIDDEN,
             None,
             -32000,
             "origin is not allowed",
+            None,
+        );
+    }
+
+    if !bearer_allowed(access.bearer_token, &headers) {
+        return error_response(
+            StatusCode::UNAUTHORIZED,
+            json_rpc_id(&message),
+            -32000,
+            "authorization failed",
             None,
         );
     }
@@ -113,6 +145,11 @@ where
     json_response(StatusCode::OK, &response)
 }
 
+pub struct AccessPolicy<'a> {
+    pub allowed_origins: &'a [String],
+    pub bearer_token: Option<&'a str>,
+}
+
 pub fn response_from_result(
     id: Option<Value>,
     result: Result<Value, JsonRpcError>,
@@ -149,6 +186,33 @@ pub fn invalid_params(message: impl Into<String>) -> JsonRpcError {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct ToolDefinition {
+    pub name: &'static str,
+    pub description: &'static str,
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Value,
+}
+
+pub fn tool_definition<T: JsonSchema>(
+    name: &'static str,
+    description: &'static str,
+) -> ToolDefinition {
+    ToolDefinition {
+        name,
+        description,
+        input_schema: schema_value::<T>(),
+    }
+}
+
+pub fn parse_tool_input<T: DeserializeOwned>(
+    tool_name: &str,
+    arguments: Value,
+) -> Result<T, JsonRpcError> {
+    serde_json::from_value(arguments)
+        .map_err(|error| invalid_params(format!("invalid {tool_name} arguments: {error}")))
+}
+
 pub fn tool_result<T: Serialize>(data: T, is_error: bool) -> Value {
     let structured = serde_json::to_value(data).unwrap_or_else(|_| json!({}));
     let text = serde_json::to_string_pretty(&structured).unwrap_or_else(|_| "{}".to_string());
@@ -176,6 +240,21 @@ fn origin_allowed(allowed_origins: &[String], headers: &HeaderMap) -> bool {
         return false;
     };
     allowed_origins.iter().any(|allowed| allowed == origin)
+}
+
+fn bearer_allowed(expected: Option<&str>, headers: &HeaderMap) -> bool {
+    let Some(expected) = expected else {
+        return true;
+    };
+    let Some(value) = headers.get(header::AUTHORIZATION) else {
+        return false;
+    };
+    let Ok(value) = value.to_str() else {
+        return false;
+    };
+    value
+        .strip_prefix("Bearer ")
+        .is_some_and(|actual| actual == expected)
 }
 
 fn validate_protocol_version(headers: &HeaderMap) -> Result<(), String> {
