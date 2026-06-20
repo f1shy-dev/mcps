@@ -15,7 +15,7 @@ region_code = "GB"
 units = "METRIC"
 
 [budget]
-monthly_budget_usd = 10.0
+monthly_budget_usd = 3.0
 ledger_path = "~/.config/google-maps-mcp/usage.sqlite"
 fail_closed = true
 refuse_unknown_pricing = true
