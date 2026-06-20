@@ -41,6 +41,11 @@ struct TargetInfo {
     user: String,
 }
 
+#[derive(Debug, Serialize)]
+struct TargetsResult {
+    targets: Vec<TargetInfo>,
+}
+
 pub async fn handle_mcp(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -126,8 +131,8 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, JsonRpcErro
     }
 }
 
-fn targets_result(state: &AppState) -> Vec<TargetInfo> {
-    state
+fn targets_result(state: &AppState) -> TargetsResult {
+    let targets = state
         .targets
         .values()
         .map(|target| TargetInfo {
@@ -136,5 +141,6 @@ fn targets_result(state: &AppState) -> Vec<TargetInfo> {
             port: target.port,
             user: target.user.clone(),
         })
-        .collect()
+        .collect();
+    TargetsResult { targets }
 }
