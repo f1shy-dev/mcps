@@ -1,11 +1,10 @@
 # 🌸 MCPs
 
-Small, independent MCP servers. Each crate builds and runs as its own service.
+Small, independent MCP servers.
 
 | MCP | Status | Notes |
 | --- | --- | --- |
 | [`ssh-mcp`](crates/ssh-mcp) | working | Restricted SSH-over-MCP command runner. |
-| `obsidian-vfs-mcp` | planned | Obsidian vault VFS MCP. |
 
 Shared:
 
