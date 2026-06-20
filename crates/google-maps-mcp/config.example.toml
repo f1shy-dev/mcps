@@ -1,0 +1,55 @@
+[server]
+bind = "0.0.0.0:8000"
+name = "Google Maps MCP"
+instructions = "Use Google Maps tools for geocoding, places, routing, imagery, environment, and related location APIs. All billable calls are checked against a local monthly budget first."
+allowed_origins = []
+
+[provider]
+api_key_env = "GOOGLE_MAPS_API_KEY"
+# Required only for route optimization.
+project_id = ""
+language_code = "en-GB"
+region_code = "GB"
+units = "METRIC"
+
+[budget]
+monthly_budget_usd = 10.0
+ledger_path = "~/.config/google-maps-mcp/usage.sqlite"
+fail_closed = true
+refuse_unknown_pricing = true
+
+[cache]
+enabled = true
+path = "~/.cache/google-maps-mcp/cache.sqlite"
+max_bytes = 1073741824
+
+[limits]
+max_places_results_default = 10
+max_places_results_hard = 20
+max_waypoints_default = 10
+max_waypoints_hard = 25
+max_route_matrix_elements_default = 25
+max_route_matrix_elements_hard = 100
+max_static_map_width = 1280
+max_static_map_height = 1280
+max_raw_response_bytes = 1048576
+request_timeout_seconds = 30
+
+[modules]
+geocoding = true
+places = true
+autocomplete = true
+timezone = true
+routes = true
+route_matrix = true
+static_maps = true
+streetview = true
+elevation = true
+weather = true
+air_quality = true
+pollen = true
+address_validation = true
+roads = true
+route_optimization = true
+solar = true
+

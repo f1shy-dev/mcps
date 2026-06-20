@@ -4,9 +4,11 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock* ./
 COPY crates/mcp-shared/Cargo.toml crates/mcp-shared/Cargo.toml
 COPY crates/ssh-mcp/Cargo.toml crates/ssh-mcp/Cargo.toml
-RUN mkdir -p crates/mcp-shared/src crates/ssh-mcp/src && \
+COPY crates/google-maps-mcp/Cargo.toml crates/google-maps-mcp/Cargo.toml
+RUN mkdir -p crates/mcp-shared/src crates/ssh-mcp/src crates/google-maps-mcp/src && \
     printf '' > crates/mcp-shared/src/lib.rs && \
-    printf 'fn main() {}' > crates/ssh-mcp/src/main.rs
+    printf 'fn main() {}' > crates/ssh-mcp/src/main.rs && \
+    printf 'fn main() {}' > crates/google-maps-mcp/src/main.rs
 RUN cargo fetch --locked
 
 COPY crates/mcp-shared/src crates/mcp-shared/src
