@@ -4,7 +4,7 @@
 
 Uncached live calls reserve estimated billable spend in a local SQLite monthly budget ledger before the Google request is made. The estimate applies the configured Google Maps monthly free unit cap per SKU, so early calls inside the free tier record units but `$0` estimated cost. Cache hits do not call Google or require remaining budget. Static Maps and Street View image tools only build unsigned URLs; they report estimated cost but do not record spend because the server did not fetch Google.
 
-The default bind is `0.0.0.0:8000`. If `PORT` is set, the server binds to `0.0.0.0:$PORT` so the Docker image works on platforms such as Railway without a config file. Set `GOOGLE_MAPS_MCP_BEARER_TOKEN` to require MCP requests to include `Authorization: Bearer <token>`; without it, the endpoint is unauthenticated and should be protected by the deployment platform.
+The default bind is `[::]:8000`, which accepts Railway's private IPv6 traffic as well as public IPv4 traffic. If `PORT` is set, the server binds to `[::]:$PORT` so the Docker image works on platforms such as Railway without a config file. Set `GOOGLE_MAPS_MCP_BEARER_TOKEN` to require MCP requests to include `Authorization: Bearer <token>`; without it, the endpoint is unauthenticated and should be protected by the deployment platform.
 
 Most tools use `GOOGLE_MAPS_API_KEY`. Route Optimization requires an OAuth access token with the `cloud-platform` scope because Google checks the caller's `routeoptimization.locations.use` IAM permission on the target project; it reads the token from `GOOGLE_MAPS_OAUTH_TOKEN` and the project from `provider.project_id`.
 
