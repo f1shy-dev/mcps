@@ -331,7 +331,7 @@ fn home_dir() -> PathBuf {
 }
 
 fn default_bind() -> SocketAddr {
-    "0.0.0.0:8000".parse().expect("valid default bind")
+    "[::]:8000".parse().expect("valid default bind")
 }
 fn default_name() -> String {
     "Google Maps MCP".to_string()
@@ -413,7 +413,7 @@ mod tests {
     fn loads_safe_defaults_without_config_path() {
         let config = Config::load(None).unwrap();
 
-        assert_eq!(config.server.bind, "0.0.0.0:8000".parse().unwrap());
+        assert_eq!(config.server.bind, "[::]:8000".parse().unwrap());
         assert_eq!(config.provider.api_key_env, "GOOGLE_MAPS_API_KEY");
         assert_eq!(config.budget.monthly_budget_usd, 3.0);
         assert!(config.cache.enabled);
@@ -442,7 +442,7 @@ monthly_budget_usd = 5.0
         assert_eq!(config.provider.language_code, "fr");
         assert_eq!(config.provider.region_code, "FR");
         assert_eq!(config.budget.monthly_budget_usd, 5.0);
-        assert_eq!(config.server.bind, "0.0.0.0:8000".parse().unwrap());
+        assert_eq!(config.server.bind, "[::]:8000".parse().unwrap());
     }
 
     #[test]

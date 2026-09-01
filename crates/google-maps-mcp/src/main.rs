@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
             .context("PORT must be valid Unicode")?
             .parse::<u16>()
             .context("PORT must be a valid TCP port")?;
-        config.server.bind = ([0, 0, 0, 0], port).into();
+        config.server.bind = ([0, 0, 0, 0, 0, 0, 0, 0], port).into();
     }
     let config = Arc::new(config);
     let store = Arc::new(Store::open(&config)?);
