@@ -5,7 +5,7 @@ mod store;
 
 use std::{env, path::PathBuf, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Router,
     routing::{get, post},
@@ -27,10 +27,17 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let config_path = env::var_os("GOOGLE_MAPS_MCP_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/etc/google-maps-mcp/config.toml"));
-    let config = Arc::new(Config::load(config_path)?);
+    let config_path = env::var_os("GOOGLE_MAPS_MCP_CONFIG").map(PathBuf::from);
+    let mut config = Config::load(config_path)?;
+    if let Some(port) = env::var_os("PORT") {
+        let port = port
+            .to_str()
+            .context("PORT must be valid Unicode")?
+            .parse::<u16>()
+            .context("PORT must be a valid TCP port")?;
+        config.server.bind = ([0, 0, 0, 0], port).into();
+    }
+    let config = Arc::new(config);
     let store = Arc::new(Store::open(&config)?);
     let google = Arc::new(GoogleClient::new(config.clone(), store.clone())?);
     let state = AppState::new(config.clone(), google);
