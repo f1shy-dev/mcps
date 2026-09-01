@@ -4,9 +4,9 @@
 
 Uncached live calls reserve estimated billable spend in a local SQLite monthly budget ledger before the Google request is made. The estimate applies the configured Google Maps monthly free unit cap per SKU, so early calls inside the free tier record units but `$0` estimated cost. Cache hits do not call Google or require remaining budget. Static Maps and Street View image tools only build unsigned URLs; they report estimated cost but do not record spend because the server did not fetch Google.
 
-The default bind is `127.0.0.1:8000`. If `server.bind` is changed to a non-loopback address, `GOOGLE_MAPS_MCP_BEARER_TOKEN` must be set and MCP requests must include `Authorization: Bearer <token>`.
+The default bind is `0.0.0.0:8000`. If `PORT` is set, the server binds to `0.0.0.0:$PORT` so the Docker image works on platforms such as Railway without a config file. Set `GOOGLE_MAPS_MCP_BEARER_TOKEN` to require MCP requests to include `Authorization: Bearer <token>`; without it, the endpoint is unauthenticated and should be protected by the deployment platform.
 
-Most tools use `GOOGLE_MAPS_API_KEY`. Route Optimization requires OAuth and reads `GOOGLE_MAPS_OAUTH_TOKEN`.
+Most tools use `GOOGLE_MAPS_API_KEY`. Route Optimization requires an OAuth access token with the `cloud-platform` scope because Google checks the caller's `routeoptimization.locations.use` IAM permission on the target project; it reads the token from `GOOGLE_MAPS_OAUTH_TOKEN` and the project from `provider.project_id`.
 
 ## Tools
 
@@ -34,14 +34,14 @@ Most tools use `GOOGLE_MAPS_API_KEY`. Route Optimization requires OAuth and read
 ## Local Run
 
 ```bash
-GOOGLE_MAPS_API_KEY=... \
-GOOGLE_MAPS_MCP_CONFIG=crates/google-maps-mcp/config.example.toml \
-cargo run -p google-maps-mcp
+GOOGLE_MAPS_API_KEY=... cargo run -p google-maps-mcp
 ```
 
-Without `GOOGLE_MAPS_API_KEY`, dry-runs and usage status still work; billable live calls fail closed.
+No config file is required. The built-in configuration binds to all interfaces, caps estimated spend at `$3` per month, and uses local SQLite files for the usage ledger and cache. Set `GOOGLE_MAPS_MCP_CONFIG` to override these defaults with a TOML file such as `config.example.toml`; an explicitly configured missing or invalid file is an error.
 
-For network exposure:
+Without `GOOGLE_MAPS_API_KEY`, dry-runs and usage status still work; billable live calls fail closed. Route Optimization additionally needs `GOOGLE_MAPS_OAUTH_TOKEN` and a configured `provider.project_id`.
+
+For authenticated network exposure:
 
 ```bash
 GOOGLE_MAPS_API_KEY=... \

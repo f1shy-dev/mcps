@@ -19,6 +19,6 @@ SSH_MCP_CONFIG=crates/ssh-mcp/config.example.toml cargo run -p ssh-mcp
 docker build -f crates/ssh-mcp/Dockerfile -t ssh-mcp:local .
 
 cargo build -p google-maps-mcp --release
-GOOGLE_MAPS_MCP_CONFIG=crates/google-maps-mcp/config.example.toml cargo run -p google-maps-mcp
+GOOGLE_MAPS_API_KEY=... cargo run -p google-maps-mcp
 docker build -f crates/google-maps-mcp/Dockerfile -t google-maps-mcp:local .
 ```

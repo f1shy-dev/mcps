@@ -1,9 +1,13 @@
-use std::{env, fs, net::SocketAddr, path::PathBuf};
+use std::{
+    env, fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub server: ServerConfig,
@@ -132,11 +136,16 @@ pub struct ModuleConfig {
 }
 
 impl Config {
-    pub fn load(path: PathBuf) -> Result<Self> {
-        let text = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read config {}", path.display()))?;
-        let mut config: Self = toml::from_str(&text)
-            .with_context(|| format!("failed to parse config {}", path.display()))?;
+    pub fn load(path: Option<PathBuf>) -> Result<Self> {
+        let mut config = match path {
+            Some(path) => {
+                let text = fs::read_to_string(&path)
+                    .with_context(|| format!("failed to read config {}", path.display()))?;
+                toml::from_str(&text)
+                    .with_context(|| format!("failed to parse config {}", path.display()))?
+            }
+            None => Self::default(),
+        };
         config.expand_paths();
         config.validate()?;
         Ok(config)
@@ -193,12 +202,6 @@ impl Config {
         }
         if !self.budget.refuse_unknown_pricing {
             bail!("budget.refuse_unknown_pricing=false is not supported");
-        }
-        if !self.server.bind.ip().is_loopback() && self.bearer_token().is_none() {
-            bail!(
-                "{} must be set when binding Google Maps MCP to a non-loopback address",
-                self.server.bearer_token_env
-            );
         }
         if self.budget.monthly_budget_usd < 0.0 {
             bail!("monthly_budget_usd must not be negative");
@@ -310,14 +313,14 @@ impl Default for ModuleConfig {
     }
 }
 
-fn expand_home(path: &PathBuf) -> PathBuf {
+fn expand_home(path: &Path) -> PathBuf {
     let text = path.to_string_lossy();
     if text == "~" {
         home_dir()
     } else if let Some(rest) = text.strip_prefix("~/") {
         home_dir().join(rest)
     } else {
-        path.clone()
+        path.to_path_buf()
     }
 }
 
@@ -328,7 +331,7 @@ fn home_dir() -> PathBuf {
 }
 
 fn default_bind() -> SocketAddr {
-    "127.0.0.1:8000".parse().expect("valid default bind")
+    "0.0.0.0:8000".parse().expect("valid default bind")
 }
 fn default_name() -> String {
     "Google Maps MCP".to_string()
@@ -358,7 +361,7 @@ fn default_true() -> bool {
     true
 }
 fn default_monthly_budget_usd() -> f64 {
-    10.0
+    3.0
 }
 fn default_ledger_path() -> PathBuf {
     PathBuf::from("~/.config/google-maps-mcp/usage.sqlite")
@@ -398,4 +401,68 @@ fn default_raw_response_bytes() -> usize {
 }
 fn default_timeout() -> u64 {
     30
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    #[test]
+    fn loads_safe_defaults_without_config_path() {
+        let config = Config::load(None).unwrap();
+
+        assert_eq!(config.server.bind, "0.0.0.0:8000".parse().unwrap());
+        assert_eq!(config.provider.api_key_env, "GOOGLE_MAPS_API_KEY");
+        assert_eq!(config.budget.monthly_budget_usd, 3.0);
+        assert!(config.cache.enabled);
+        assert!(config.modules.route_optimization);
+    }
+
+    #[test]
+    fn explicit_config_overrides_defaults() {
+        let path = temporary_path("overrides");
+        fs::write(
+            &path,
+            r#"
+[provider]
+language_code = "fr"
+region_code = "FR"
+
+[budget]
+monthly_budget_usd = 5.0
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(path.clone())).unwrap();
+        fs::remove_file(path).unwrap();
+
+        assert_eq!(config.provider.language_code, "fr");
+        assert_eq!(config.provider.region_code, "FR");
+        assert_eq!(config.budget.monthly_budget_usd, 5.0);
+        assert_eq!(config.server.bind, "0.0.0.0:8000".parse().unwrap());
+    }
+
+    #[test]
+    fn explicit_missing_config_is_an_error() {
+        let path = temporary_path("missing");
+
+        let error = Config::load(Some(path.clone())).unwrap_err();
+
+        assert!(error.to_string().contains("failed to read config"));
+        assert!(error.to_string().contains(&path.display().to_string()));
+    }
+
+    fn temporary_path(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        env::temp_dir().join(format!(
+            "google-maps-mcp-{name}-{}-{nonce}.toml",
+            std::process::id()
+        ))
+    }
 }
