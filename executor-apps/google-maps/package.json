@@ -1,0 +1,12 @@
+{
+  "name": "google-maps",
+  "description": "Google Maps Platform tools for Executor: geocoding, places, routes, imagery URLs, weather, air quality, pollen, roads, route optimization and solar, with a monthly budget guard.",
+  "private": true,
+  "type": "module",
+  "executor": {
+    "title": "Google Maps"
+  },
+  "dependencies": {
+    "apps": "0.0.1-beta.122"
+  }
+}
